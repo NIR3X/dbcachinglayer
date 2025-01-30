@@ -71,7 +71,7 @@ func TestDBCachingLayer(t *testing.T) {
 		t.Fatalf("Error creating table: %v", err)
 	}
 
-	dbcl, err := NewDBCL[*Note]("sqlite3", ":memory:", 1*time.Second)
+	dbcl, err := NewDBCL[*Note]("sqlite3", ":memory:", 15*time.Second)
 	if err != nil {
 		t.Fatalf("Error creating DBCL: %v", err)
 	}

@@ -64,7 +64,7 @@ import (
 )
 
 func main() {
-    dbcl, err := NewDBCL[*Note]("sqlite3", "notes.db", 1*time.Minute)
+    dbcl, err := NewDBCL[*Note]("sqlite3", "notes.db", 15*time.Second)
     if err != nil {
         log.Fatalf("Failed to create DBCL: %v", err)
     }
