@@ -10,10 +10,11 @@ import (
 )
 
 type DBCLRecord interface {
-	DBCLSelectAll(*sql.DB) (*sql.Rows, error)
-	DBCLScan(*sql.Rows) error
+	DBCLClone() DBCLRecord
 	DBCLGetId() int64
 	DBCLSetId(int64)
+	DBCLSelectAll(*sql.DB) (*sql.Rows, error)
+	DBCLScan(*sql.Rows) error
 	DBCLInsert(*sql.Tx, DBCLRecord) (sql.Result, error)
 	DBCLUpdate(*sql.Tx, DBCLRecord) (sql.Result, error)
 	DBCLDelete(*sql.Tx, int64) (sql.Result, error)
@@ -21,31 +22,37 @@ type DBCLRecord interface {
 }
 
 type DBCL[Record DBCLRecord] struct {
-	db           *sql.DB
-	ticker       *time.Ticker
-	wg           sync.WaitGroup
-	mtx          sync.Mutex
-	stop         chan bool
-	keyRecords   []int64
-	nextRecordId int64
-	records      map[int64]Record
-	writeCache   map[int64][]Record
+	db             *sql.DB
+	ticker         *time.Ticker
+	wg             sync.WaitGroup
+	mtx            sync.Mutex
+	stop           chan bool
+	keyRecords     []int64
+	nextRecordId   int64
+	records        map[int64]Record
+	writeCache     map[int64][]Record
+	byColumns      map[string]interface{}
+	modifyCallback func(map[string]interface{}, int64, Record, Record)
 }
 
-func NewDBCL[Record DBCLRecord](driverName, dataSourceName string, interval time.Duration) (*DBCL[Record], error) {
+func NewDBCL[Record DBCLRecord](
+	driverName, dataSourceName string, interval time.Duration, modifyCallback func(byColumns map[string]interface{}, id int64, oldRecord, newRecord Record),
+) (*DBCL[Record], error) {
 	db, err := sql.Open(driverName, dataSourceName)
 	if err != nil {
 		return nil, err
 	}
 
 	s := &DBCL[Record]{
-		db:           db,
-		ticker:       time.NewTicker(interval),
-		stop:         make(chan bool),
-		keyRecords:   make([]int64, 0),
-		nextRecordId: 1,
-		records:      make(map[int64]Record),
-		writeCache:   make(map[int64][]Record),
+		db:             db,
+		ticker:         time.NewTicker(interval),
+		stop:           make(chan bool),
+		keyRecords:     make([]int64, 0),
+		nextRecordId:   1,
+		records:        make(map[int64]Record),
+		writeCache:     make(map[int64][]Record),
+		byColumns:      make(map[string]interface{}),
+		modifyCallback: modifyCallback,
 	}
 	s.loadRecords()
 	s.wg.Add(1)
@@ -164,7 +171,13 @@ func (d *DBCL[Record]) saveRecords() error {
 func (d *DBCL[Record]) GetRecord(id int64) Record {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
-	return d.records[id]
+
+	record, exists := d.records[id]
+	if !exists {
+		return record
+	}
+
+	return record.DBCLClone().(Record)
 }
 
 func (d *DBCL[Record]) GetRecordsRange(offset, limit int64) []Record {
@@ -178,11 +191,35 @@ func (d *DBCL[Record]) GetRecordsRange(offset, limit int64) []Record {
 		cuttingLength := min(keyRecordsLength, offset+limit)
 
 		for _, id := range d.keyRecords[offset:cuttingLength] {
-			records = append(records, d.records[id])
+			records = append(records, d.records[id].DBCLClone().(Record))
 		}
 	}
 
 	return records
+}
+
+func GetRecordByColumn[Record DBCLRecord, RecordKey comparable](dbcl *DBCL[Record], columnName string, recordKey RecordKey) Record {
+	dbcl.mtx.Lock()
+	defer dbcl.mtx.Unlock()
+
+	var zero Record
+
+	byColumn, ok := dbcl.byColumns[columnName]
+	if !ok {
+		return zero
+	}
+
+	byColumnMap, ok := byColumn.(map[RecordKey]Record)
+	if !ok {
+		return zero
+	}
+
+	record, ok := byColumnMap[recordKey]
+	if !ok {
+		return zero
+	}
+
+	return record.DBCLClone().(Record)
 }
 
 func binarySearch(arr []int64, target int64) int {
@@ -208,7 +245,7 @@ func (d *DBCL[Record]) modifyRecord(id int64, record Record) {
 	if id == 0 {
 		id = d.nextRecordId
 	}
-	_, recordExists := d.records[id]
+	oldRecord, recordExists := d.records[id]
 	var zero Record
 	if any(record) == any(zero) {
 		if recordExists {
@@ -221,6 +258,9 @@ func (d *DBCL[Record]) modifyRecord(id int64, record Record) {
 					return d.keyRecords[i] < d.keyRecords[j]
 				})
 			}
+			if d.modifyCallback != nil {
+				d.modifyCallback(d.byColumns, id, oldRecord, zero)
+			}
 			delete(d.records, id)
 			d.writeCache[id] = append(d.writeCache[id], zero)
 		}
@@ -232,6 +272,10 @@ func (d *DBCL[Record]) modifyRecord(id int64, record Record) {
 			sort.Slice(d.keyRecords, func(i, j int) bool {
 				return d.keyRecords[i] < d.keyRecords[j]
 			})
+		}
+		record = record.DBCLClone().(Record)
+		if d.modifyCallback != nil {
+			d.modifyCallback(d.byColumns, id, oldRecord, record)
 		}
 		d.records[id] = record
 		d.writeCache[id] = append(d.writeCache[id], record)

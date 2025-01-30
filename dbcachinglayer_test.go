@@ -18,12 +18,8 @@ func NewNote(id int64, title, content string) *Note {
 	return &Note{id, title, content}
 }
 
-func (n *Note) DBCLSelectAll(db *sql.DB) (*sql.Rows, error) {
-	return db.Query("SELECT id, title, content FROM notes")
-}
-
-func (n *Note) DBCLScan(rows *sql.Rows) error {
-	return rows.Scan(&n.Id, &n.Title, &n.Content)
+func (n *Note) DBCLClone() DBCLRecord {
+	return NewNote(n.Id, n.Title, n.Content)
 }
 
 func (n *Note) DBCLGetId() int64 {
@@ -32,6 +28,14 @@ func (n *Note) DBCLGetId() int64 {
 
 func (n *Note) DBCLSetId(id int64) {
 	n.Id = id
+}
+
+func (n *Note) DBCLSelectAll(db *sql.DB) (*sql.Rows, error) {
+	return db.Query("SELECT id, title, content FROM notes")
+}
+
+func (n *Note) DBCLScan(rows *sql.Rows) error {
+	return rows.Scan(&n.Id, &n.Title, &n.Content)
 }
 
 func (n *Note) DBCLInsert(tx *sql.Tx, note DBCLRecord) (sql.Result, error) {
@@ -63,7 +67,19 @@ func TestDBCachingLayer(t *testing.T) {
 		t.Fatalf("Error creating table: %v", err)
 	}
 
-	dbcl, err := NewDBCL[*Note]("sqlite3", ":memory:", 15*time.Second)
+	dbcl, err := NewDBCL[*Note]("sqlite3", ":memory:", 15*time.Second, func(byColumns map[string]interface{}, id int64, oldRecord, newRecord *Note) {
+		byTitle, ok := byColumns["title"].(map[string]*Note)
+		if !ok {
+			byTitle = make(map[string]*Note)
+			byColumns["title"] = byTitle
+		}
+		if oldRecord != nil {
+			delete(byTitle, oldRecord.Title)
+		}
+		if newRecord != nil {
+			byTitle[newRecord.Title] = newRecord
+		}
+	})
 	if err != nil {
 		t.Fatalf("Error creating DBCL: %v", err)
 	}
@@ -87,7 +103,21 @@ func TestDBCachingLayer(t *testing.T) {
 	if record.Content != "Content" {
 		t.Fatalf("Expected record content to be 'Content', got '%s'", record.Content)
 	}
+	record = GetRecordByColumn(dbcl, "title", "Title")
+	if record == nil {
+		t.Fatalf("Expected record to be found")
+	}
+	if record.Id != 1 {
+		t.Fatalf("Expected record id to be 1, got %d", record.Id)
+	}
+	if record.Title != "Title" {
+		t.Fatalf("Expected record title to be 'Title', got '%s'", record.Title)
+	}
+	if record.Content != "Content" {
+		t.Fatalf("Expected record content to be 'Content', got '%s'", record.Content)
+	}
 
+	record = record.DBCLClone().(*Note)
 	record.Title = "New Title"
 	dbcl.UpdateRecord(record.Id, record)
 	record = dbcl.GetRecord(record.Id)
@@ -100,9 +130,33 @@ func TestDBCachingLayer(t *testing.T) {
 	if record.Title != "New Title" {
 		t.Fatalf("Expected record title to be 'New Title', got '%s'", record.Title)
 	}
+	if record.Content != "Content" {
+		t.Fatalf("Expected record content to be 'Content', got '%s'", record.Content)
+	}
+	record = GetRecordByColumn(dbcl, "title", "Title")
+	if record != nil {
+		t.Fatalf("Expected record to be deleted")
+	}
+	record = GetRecordByColumn(dbcl, "title", "New Title")
+	if record == nil {
+		t.Fatalf("Expected record to be found")
+	}
+	if record.Id != 1 {
+		t.Fatalf("Expected record id to be 1, got %d", record.Id)
+	}
+	if record.Title != "New Title" {
+		t.Fatalf("Expected record title to be 'New Title', got '%s'", record.Title)
+	}
+	if record.Content != "Content" {
+		t.Fatalf("Expected record content to be 'Content', got '%s'", record.Content)
+	}
 
 	dbcl.DeleteRecord(1)
 	record = dbcl.GetRecord(1)
+	if record != nil {
+		t.Fatalf("Expected record to be deleted")
+	}
+	record = GetRecordByColumn(dbcl, "title", "New Title")
 	if record != nil {
 		t.Fatalf("Expected record to be deleted")
 	}

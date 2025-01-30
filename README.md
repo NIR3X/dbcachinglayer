@@ -14,6 +14,7 @@ This implementation enables developers to manage records efficiently while abstr
 - **In-Memory Record Cache:** Reduces database queries by maintaining an in-memory cache.
 - **Transactional Updates:** Ensures data consistency through SQL transactions.
 - **Thread-Safe Operations:** Concurrent-safe access to records.
+- **By-Columns Record Indexing:** Efficient retrieval of records using custom column values as lookup keys.
 
 ---
 
@@ -34,17 +35,17 @@ Implement the `DBCLRecord` interface for your custom record type.
 package main
 
 type Note struct {
-    Id      int64
-    Title   string
-    Content string
+	Id int64
+	Title string
+	Content string
 }
 
 func NewNote(id int64, title, content string) *Note {
 	return &Note{id, title, content}
 }
 
-func (n *Note) DBCLSelectAll(db *sql.DB) (*sql.Rows, error) {
-	return db.Query("SELECT id, title, content FROM notes")
+func (n *Note) DBCLClone() DBCLRecord {
+	return NewNote(n.Id, n.Title, n.Content)
 }
 
 // Implement other DBCLRecord methods...
@@ -56,47 +57,84 @@ func (n *Note) DBCLSelectAll(db *sql.DB) (*sql.Rows, error) {
 package main
 
 import (
-    "database/sql"
-    "log"
-    "time"
+	"database/sql"
+	"log"
+	"time"
 
-    _ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func main() {
-    dbcl, err := NewDBCL[*Note]("sqlite3", "notes.db", 15*time.Second)
-    if err != nil {
-        log.Fatalf("Failed to create DBCL: %v", err)
-    }
-    defer dbcl.Close()
+	dbcl, err := NewDBCL[*Note]("sqlite3", "notes.db", 15*time.Second, nil)
+	if err != nil {
+		log.Fatalf("Failed to create DBCL: %v", err)
+	}
+	defer dbcl.Close()
 
-    note := &Note{Title: "Sample", Content: "Sample Content"}
-    dbcl.InsertRecord(note)
+	note := &Note{Title: "Sample", Content: "Sample Content"}
+	dbcl.InsertRecord(note)
 }
 ```
 
 ### 3. CRUD Operations
 
 - **Insert:**
-  ```go
-  dbcl.InsertRecord(note)
-  ```
+```go
+dbcl.InsertRecord(note)
+```
 
 - **Get Record by ID:**
-  ```go
-  record := dbcl.GetRecord(note.Id)
-  ```
+```go
+record := dbcl.GetRecord(note.Id)
+```
 
 - **Update:**
-  ```go
-  note.Title = "Updated Title"
-  dbcl.UpdateRecord(note.Id, note)
-  ```
+```go
+note.Title = "Updated Title"
+dbcl.UpdateRecord(note.Id, note)
+```
 
 - **Delete:**
-  ```go
-  dbcl.DeleteRecord(note.Id)
-  ```
+```go
+dbcl.DeleteRecord(note.Id)
+```
+
+---
+
+## By-Columns Feature
+
+The `byColumns` feature is a powerful way to maintain an additional in-memory lookup table for efficient record retrieval based on specific column values (such as `title`). This helps avoid full scans and speeds up searches when using frequently accessed columns as indexes.
+
+You can define a custom modify callback function to track changes in specific columns:
+
+```go
+dbcl, err := NewDBCL[*Note]("sqlite3", ":memory:", 15*time.Second, func(byColumns map[string]interface{}, id int64, oldRecord, newRecord *Note) {
+	byTitle, ok := byColumns["title"].(map[string]*Note)
+	if !ok {
+		byTitle = make(map[string]*Note)
+		byColumns["title"] = byTitle
+	}
+	if oldRecord != nil {
+		delete(byTitle, oldRecord.Title)
+	}
+	if newRecord != nil {
+		byTitle[newRecord.Title] = newRecord
+	}
+})
+```
+
+### Retrieve Record by Column
+
+To efficiently get a record by a custom column value (e.g., title), use `GetRecordByColumn`:
+
+```go
+record := GetRecordByColumn(dbcl, "title", "Sample Title")
+if record != nil {
+	log.Printf("Found record: %+v\n", record)
+} else {
+	log.Println("Record not found")
+}
+```
 
 ---
 
@@ -113,10 +151,10 @@ go test ./...
 ## Example Test Output
 
 ```bash
-=== RUN   TestDBCachingLayer
+=== RUN TestDBCachingLayer
 --- PASS: TestDBCachingLayer (0.02s)
 PASS
-ok      dbcachinglayer    0.021s
+ok dbcachinglayer 0.021s
 ```
 
 ---
@@ -130,4 +168,3 @@ will. Specifically you can redistribute and/or modify it under the terms of the
 [GNU Affero General Public License](https://www.gnu.org/licenses/agpl-3.0.html) as
 published by the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
-
