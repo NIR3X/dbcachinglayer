@@ -10,7 +10,6 @@ import (
 )
 
 type DBCLRecord interface {
-	DBCLNewRecord(...interface{}) DBCLRecord
 	DBCLSelectAll(*sql.DB) (*sql.Rows, error)
 	DBCLInsert(*sql.Tx, DBCLRecord) (sql.Result, error)
 	DBCLUpdate(*sql.Tx, DBCLRecord) (sql.Result, error)

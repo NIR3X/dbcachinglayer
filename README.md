@@ -43,8 +43,8 @@ func NewNote(id int64, title, content string) *Note {
 	return &Note{id, title, content}
 }
 
-func (n *Note) DBCLNewRecord(args ...interface{}) DBCLRecord {
-	return NewNote(args[0].(int64), args[1].(string), args[2].(string))
+func (n *Note) DBCLSelectAll(db *sql.DB) (*sql.Rows, error) {
+	return db.Query("SELECT id, title, content FROM notes")
 }
 
 // Implement other DBCLRecord methods...
