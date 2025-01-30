@@ -19,11 +19,7 @@ func NewNote(id int64, title, content string) *Note {
 }
 
 func (n *Note) DBCLNewRecord(args ...interface{}) DBCLRecord {
-	return &Note{
-		Id:      args[0].(int64),
-		Title:   args[1].(string),
-		Content: args[2].(string),
-	}
+	return NewNote(args[0].(int64), args[1].(string), args[2].(string))
 }
 
 func (n *Note) DBCLFields() (int64, string, string) {
