@@ -11,13 +11,13 @@ import (
 
 type DBCLRecord interface {
 	DBCLSelectAll(*sql.DB) (*sql.Rows, error)
+	DBCLScan(*sql.Rows) error
+	DBCLGetId() int64
+	DBCLSetId(int64)
 	DBCLInsert(*sql.Tx, DBCLRecord) (sql.Result, error)
 	DBCLUpdate(*sql.Tx, DBCLRecord) (sql.Result, error)
 	DBCLDelete(*sql.Tx, int64) (sql.Result, error)
 	DBCLExists(*sql.Tx, int64) (bool, error)
-	DBCLScan(*sql.Rows) error
-	DBCLGetId() int64
-	DBCLSetId(int64)
 }
 
 type DBCL[Record DBCLRecord] struct {

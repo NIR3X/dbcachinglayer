@@ -22,6 +22,18 @@ func (n *Note) DBCLSelectAll(db *sql.DB) (*sql.Rows, error) {
 	return db.Query("SELECT id, title, content FROM notes")
 }
 
+func (n *Note) DBCLScan(rows *sql.Rows) error {
+	return rows.Scan(&n.Id, &n.Title, &n.Content)
+}
+
+func (n *Note) DBCLGetId() int64 {
+	return n.Id
+}
+
+func (n *Note) DBCLSetId(id int64) {
+	n.Id = id
+}
+
 func (n *Note) DBCLInsert(tx *sql.Tx, note DBCLRecord) (sql.Result, error) {
 	return tx.Exec("INSERT INTO notes (id, title, content) VALUES (?, ?)", note.(*Note).Id, note.(*Note).Title, note.(*Note).Content)
 }
@@ -37,18 +49,6 @@ func (n *Note) DBCLExists(tx *sql.Tx, id int64) (bool, error) {
 	var exists bool
 	err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM notes WHERE id = ?)", id).Scan(&exists)
 	return exists, err
-}
-
-func (n *Note) DBCLScan(rows *sql.Rows) error {
-	return rows.Scan(&n.Id, &n.Title, &n.Content)
-}
-
-func (n *Note) DBCLGetId() int64 {
-	return n.Id
-}
-
-func (n *Note) DBCLSetId(id int64) {
-	n.Id = id
 }
 
 func TestDBCachingLayer(t *testing.T) {
